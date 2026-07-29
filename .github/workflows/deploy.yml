@@ -11,38 +11,37 @@ jobs:
     steps:
     # 1. Checkout source code
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
-    # 2. Setup Go & Run Unit Test
+    # 2. Setup Go
     - name: Setup Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: '1.21'
+        cache: false
 
-    - name: Run Unit Tests
-      run: |
-        cd backend
-        go test ./... -v || true
-
-    # 3. Setup Node.js & Build Frontend
+    # 3. Setup Node.js
     - name: Setup Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '20'
 
+    # 4. Build Backend Go
+    - name: Build Backend Binary
+      run: |
+        if [ -d "backend" ]; then cd backend; fi
+        go mod tidy || true
+        go test ./... -v || true
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main main.go
+
+    # 5. Build Frontend React
     - name: Build Frontend
       run: |
-        cd frontend
+        if [ -d "frontend" ]; then cd frontend; fi
         npm install
         npm run build
 
-    # 4. Build Backend Go Binary
-    - name: Build Backend Binary
-      run: |
-        cd backend
-        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main main.go
-
-    # 5. Deploy files to VPS via Password
+    # 6. Deploy files to VPS via Password
     - name: Deploy to VPS
       uses: appleboy/scp-action@v0.1.4
       with:
@@ -50,10 +49,10 @@ jobs:
         username: ${{ secrets.VPS_USERNAME }}
         password: ${{ secrets.VPS_PASSWORD }}
         port: ${{ secrets.VPS_PORT }}
-        source: "backend/main,frontend/dist/*"
+        source: "**/main,**/dist/*"
         target: "/var/www/phongtro_temp"
 
-    # 6. Restart App on VPS via Password
+    # 7. Restart App on VPS via Password
     - name: Restart Application on VPS
       uses: appleboy/ssh-action@v1.0.0
       with:
@@ -62,25 +61,31 @@ jobs:
         password: ${{ secrets.VPS_PASSWORD }}
         port: ${{ secrets.VPS_PORT }}
         script: |
-          # Copy frontend
+          # 1. Copy Frontend dist vào đúng Nginx folder
           mkdir -p /var/www/phongtro/frontend/dist
-          cp -r /var/www/phongtro_temp/frontend/dist/* /var/www/phongtro/frontend/dist/
+          DIST_PATH=$(find /var/www/phongtro_temp -type d -name "dist" | head -n 1)
+          if [ -n "$DIST_PATH" ]; then
+            cp -r $DIST_PATH/* /var/www/phongtro/frontend/dist/
+          fi
           
-          # Copy backend
+          # 2. Copy Backend binary
           mkdir -p /var/www/phongtro/backend
-          cp /var/www/phongtro_temp/backend/main /var/www/phongtro/backend/
+          MAIN_PATH=$(find /var/www/phongtro_temp -type f -name "main" | head -n 1)
+          if [ -n "$MAIN_PATH" ]; then
+            cp $MAIN_PATH /var/www/phongtro/backend/
+          fi
           
           cd /var/www/phongtro/backend
           chmod +x main
           
-          # Restart app bằng PM2 với MONGO_URI
+          # 3. Restart app bằng PM2
           pm2 restart phongtro-api || pm2 start ./main --name "phongtro-api" --env MONGO_URI="mongodb://apartment_user:MatKhauDoiData2026!@localhost:27017/apartment_management?authSource=apartment_management"
           pm2 save
 
-          # Dọn dẹp thư mục tạm
+          # 4. Dọn dẹp folder tạm
           rm -rf /var/www/phongtro_temp
 
-    # 7. Notify Telegram on Success / Failure
+    # 8. Thông báo Telegram
     - name: Notify Telegram Success
       if: success()
       uses: appleboy/telegram-action@master
