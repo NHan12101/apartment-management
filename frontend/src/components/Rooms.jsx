@@ -209,7 +209,7 @@ export default function Rooms({ rooms, role, user, showToast, refreshData }) {
         {role === 'admin' && (
           <button className="btn btn-primary" onClick={() => openRoomModal()}>
             <Plus size={16} />
-            Thêm Phòng Mới
+            Thêm Phòng
           </button>
         )}
       </div>
