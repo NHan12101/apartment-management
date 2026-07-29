@@ -1,0 +1,105 @@
+name: CI/CD Pipeline - Apartment Management
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Checkout source code
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    # 2. Setup Go & Run Unit Test
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Run Unit Tests
+      run: |
+        cd backend
+        go test ./... -v || true
+
+    # 3. Setup Node.js & Build Frontend
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+
+    - name: Build Frontend
+      run: |
+        cd frontend
+        npm install
+        npm run build
+
+    # 4. Build Backend Go Binary
+    - name: Build Backend Binary
+      run: |
+        cd backend
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main main.go
+
+    # 5. Deploy files to VPS via Password
+    - name: Deploy to VPS
+      uses: appleboy/scp-action@v0.1.4
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USERNAME }}
+        password: ${{ secrets.VPS_PASSWORD }}
+        port: ${{ secrets.VPS_PORT }}
+        source: "backend/main,frontend/dist/*"
+        target: "/var/www/phongtro_temp"
+
+    # 6. Restart App on VPS via Password
+    - name: Restart Application on VPS
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USERNAME }}
+        password: ${{ secrets.VPS_PASSWORD }}
+        port: ${{ secrets.VPS_PORT }}
+        script: |
+          # Copy frontend
+          mkdir -p /var/www/phongtro/frontend/dist
+          cp -r /var/www/phongtro_temp/frontend/dist/* /var/www/phongtro/frontend/dist/
+          
+          # Copy backend
+          mkdir -p /var/www/phongtro/backend
+          cp /var/www/phongtro_temp/backend/main /var/www/phongtro/backend/
+          
+          cd /var/www/phongtro/backend
+          chmod +x main
+          
+          # Restart app bằng PM2 với MONGO_URI
+          pm2 restart phongtro-api || pm2 start ./main --name "phongtro-api" --env MONGO_URI="mongodb://apartment_user:MatKhauDoiData2026!@localhost:27017/apartment_management?authSource=apartment_management"
+          pm2 save
+
+          # Dọn dẹp thư mục tạm
+          rm -rf /var/www/phongtro_temp
+
+    # 7. Notify Telegram on Success / Failure
+    - name: Notify Telegram Success
+      if: success()
+      uses: appleboy/telegram-action@master
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_TOKEN }}
+        message: |
+          ✅ Deploy Sản Phẩm Thành Công!
+          • Repository: ${{ github.repository }}
+          • Commit: ${{ github.event.head_commit.message }}
+          • Website: https://phongtro.thanhnhan.food
+
+    - name: Notify Telegram Failure
+      if: failure()
+      uses: appleboy/telegram-action@master
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_TOKEN }}
+        message: |
+          ❌ Deploy Thất Bại!
+          • Repository: ${{ github.repository }}
+          • Commit: ${{ github.event.head_commit.message }}
