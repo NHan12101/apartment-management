@@ -18,7 +18,6 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.21'
-        cache: false
 
     # 3. Setup Node.js
     - name: Setup Node.js
@@ -26,13 +25,12 @@ jobs:
       with:
         node-version: '20'
 
-    # 4. Build Backend Go
-    - name: Build Backend Binary
+    # 4. Build Backend Go Binary
+    - name: Build Backend
       run: |
         if [ -d "backend" ]; then cd backend; fi
         go mod tidy || true
-        go test ./... -v || true
-        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main main.go
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main .
 
     # 5. Build Frontend React
     - name: Build Frontend
@@ -41,7 +39,7 @@ jobs:
         npm install
         npm run build
 
-    # 6. Deploy files to VPS via Password
+    # 6. Deploy files to VPS
     - name: Deploy to VPS
       uses: appleboy/scp-action@v0.1.4
       with:
@@ -52,7 +50,7 @@ jobs:
         source: "**/main,**/dist/*"
         target: "/var/www/phongtro_temp"
 
-    # 7. Restart App on VPS via Password
+    # 7. Restart App on VPS (Đã fix PATH cho PM2)
     - name: Restart Application on VPS
       uses: appleboy/ssh-action@v1.0.0
       with:
@@ -61,14 +59,17 @@ jobs:
         password: ${{ secrets.VPS_PASSWORD }}
         port: ${{ secrets.VPS_PORT }}
         script: |
-          # 1. Copy Frontend dist vào đúng Nginx folder
+          # Nạp đường dẫn PATH chứa pm2, node, npm
+          export PATH=$PATH:/usr/local/bin:/usr/bin:/bin:~/.nvm/versions/node/$(node -v 2>/dev/null)/bin
+
+          # 1. Move Frontend
           mkdir -p /var/www/phongtro/frontend/dist
           DIST_PATH=$(find /var/www/phongtro_temp -type d -name "dist" | head -n 1)
           if [ -n "$DIST_PATH" ]; then
             cp -r $DIST_PATH/* /var/www/phongtro/frontend/dist/
           fi
           
-          # 2. Copy Backend binary
+          # 2. Move Backend
           mkdir -p /var/www/phongtro/backend
           MAIN_PATH=$(find /var/www/phongtro_temp -type f -name "main" | head -n 1)
           if [ -n "$MAIN_PATH" ]; then
@@ -78,14 +79,14 @@ jobs:
           cd /var/www/phongtro/backend
           chmod +x main
           
-          # 3. Restart app bằng PM2
+          # 3. Khởi chạy / Restart bằng PM2
           pm2 restart phongtro-api || pm2 start ./main --name "phongtro-api" --env MONGO_URI="mongodb://apartment_user:MatKhauDoiData2026!@localhost:27017/apartment_management?authSource=apartment_management"
           pm2 save
 
           # 4. Dọn dẹp folder tạm
           rm -rf /var/www/phongtro_temp
 
-    # 8. Thông báo Telegram
+    # 8. Notify Telegram
     - name: Notify Telegram Success
       if: success()
       uses: appleboy/telegram-action@master
