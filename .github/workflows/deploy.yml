@@ -32,11 +32,12 @@ jobs:
         go mod tidy || true
         CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main .
 
-    # 5. Build Frontend React
+    # 5. Build Frontend React (Đã fix lỗi Permission denied Vite)
     - name: Build Frontend
       run: |
         if [ -d "frontend" ]; then cd frontend; fi
         npm install
+        chmod +x node_modules/.bin/* || true
         npm run build
 
     # 6. Deploy files to VPS
@@ -50,7 +51,7 @@ jobs:
         source: "**/main,**/dist/*"
         target: "/var/www/phongtro_temp"
 
-    # 7. Restart App on VPS (Đã fix PATH cho PM2)
+    # 7. Restart App on VPS
     - name: Restart Application on VPS
       uses: appleboy/ssh-action@v1.0.0
       with:
@@ -59,7 +60,6 @@ jobs:
         password: ${{ secrets.VPS_PASSWORD }}
         port: ${{ secrets.VPS_PORT }}
         script: |
-          # Nạp đường dẫn PATH chứa pm2, node, npm
           export PATH=$PATH:/usr/local/bin:/usr/bin:/bin:~/.nvm/versions/node/$(node -v 2>/dev/null)/bin
 
           # 1. Move Frontend
